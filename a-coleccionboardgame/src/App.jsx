@@ -7,7 +7,7 @@ function randomCollectionCode() {
 }
 
 export default function App() {
-  const [username, setUsername] = useState(""); // un solo campo
+  const [username, setUsername] = useState("");
   const [collectionCode, setCollectionCode] = useState("");
   const [owner, setOwner] = useState(""); 
   const [games, setGames] = useState([]);
@@ -15,18 +15,16 @@ export default function App() {
   const [filterUsers, setFilterUsers] = useState([]);
   const [votersList, setVotersList] = useState([]);
 
-  // Guardar voto en Supabase
+  // Guardar o actualizar voto
   async function handleVote(objectid, v) {
-    if (!username) {
-      alert("Debes ingresar un nombre o apodo antes de votar.");
-      return;
-    }
+    if (!username) return;
 
     setVotes((prev) => ({
       ...prev,
       [objectid]: { ...prev[objectid], [username]: v }
     }));
 
+    // Si ya existe voto de este usuario, actualizar
     await supabase.from("votes").upsert({
       collection_code: collectionCode,
       objectid,
@@ -98,6 +96,7 @@ export default function App() {
 
   // Cargar todos los votos de la colección
   async function loadVotes() {
+    if (!collectionCode) return;
     const { data } = await supabase
       .from("votes")
       .select("*")
@@ -124,121 +123,138 @@ export default function App() {
 
   // Filtrado derivado dinámico
   function getFilteredGames() {
-    if (filterUsers.length === 0) return games; // Sin filtro, todos los juegos
+    if (filterUsers.length === 0) return games;
 
-    // Mapear juegos con conteo de "me gusta"
     const filtered = games.map((g) => {
       const gameVotes = votes[g.objectid] || {};
       const count = filterUsers.reduce((acc, user) => acc + (gameVotes[user] === 1 ? 1 : 0), 0);
       return { ...g, likesCount: count };
     });
 
-    // Filtrar los que tengan al menos 1 "me gusta" y ordenar de mayor a menor
     return filtered
       .filter(g => g.likesCount > 0)
       .sort((a, b) => b.likesCount - a.likesCount);
   }
 
+  // =====================
+  // RENDER
+  // =====================
 
-
-  // Manejar selección múltiple en filtro
-  function handleSelectChange(e) {
-    // Tomar todas las opciones seleccionadas
-    const options = Array.from(e.target.selectedOptions).map(o => o.value);
-    setFilterUsers(options); // guardar todas al mismo tiempo
-  }
-
-
-  // Quitar un usuario del filtro
-  function removeFilterUser(user) {
-    setFilterUsers((prev) => prev.filter((u) => u !== user));
+  // Pedir usuario antes de mostrar nada
+  if (!username) {
+    return (
+      <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", flexDirection: "column", fontFamily: "Arial, sans-serif" }}>
+        <h2>Bienvenido 🎲</h2>
+        <p>Ingresa tu nombre o apodo para continuar:</p>
+        <input
+          placeholder="Tu nombre/apodo"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          style={{ padding: "10px", fontSize: "16px" }}
+        />
+      </div>
+    );
   }
 
   return (
-    <div style={{ display: "flex", justifyContent: "center", fontFamily: "Arial, sans-serif", textAlign: "center" }}>
-      <div style={{ maxWidth: "100vw", width: "100vw" }}>
-        <h1 style={{ textAlign: "center" }}>🎲 Colección de Juegos</h1>
+    <div style={{ fontFamily: "Arial, sans-serif", padding: "10px" }}>
+      <h1 style={{ textAlign: "center" }}>🎲 Colección de Juegos</h1>
 
-        <div style={{ marginBottom: "20px", textAlign: "center" }}>
-          <input
-            placeholder="Tu nombre/apodo"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-        </div>
-        <div style={{ marginBottom: "20px", textAlign: "center" }}>
-          <h2>Subir colección</h2>
-          <input
-            type="file"
-            accept=".csv"
-            onChange={handleUploadCSV}
-            style={{ cursor: "pointer" }}
-          />
-        </div>
-
-        <h2>Unirse a colección</h2>
+      <div style={{ margin: "20px 0", textAlign: "center" }}>
+        <h2>Subir colección</h2>
         <input
-          placeholder="Código de colección"
-          value={collectionCode}
-          onChange={(e) => setCollectionCode(e.target.value.toUpperCase())}
+          type="file"
+          accept=".csv"
+          onChange={handleUploadCSV}
+          style={{ cursor: "pointer" }}
         />
-        <button onClick={loadCollection}>Cargar colección</button>
+      </div>
 
-        <h2>Filtrar por usuarios</h2>
-        <div style={{ marginBottom: "10px" }}>
-          {votersList.map((user) => (
-            <label key={user} style={{ marginRight: "10px" }}>
-              <input
-                type="checkbox"
-                checked={filterUsers.includes(user)}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setFilterUsers(prev => [...prev, user]);
-                  } else {
-                    setFilterUsers(prev => prev.filter(u => u !== user));
-                  }
-                }}
-              />
-              {user}
-            </label>
-          ))}
-        </div>
+      <h2>Unirse a colección</h2>
+      <input
+        placeholder="Código de colección"
+        value={collectionCode}
+        onChange={(e) => setCollectionCode(e.target.value.toUpperCase())}
+      />
+      <button onClick={loadCollection}>Cargar colección</button>
 
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <table style={{ borderCollapse: "collapse", margin: "20px", width: "90%" }}>
-            <thead>
-              <tr>
-                <th style={{ border: "1px solid black", padding: "8px" }}>Juego</th>
-                <th style={{ border: "1px solid black", padding: "8px" }}>Original</th>
-                <th style={{ border: "1px solid black", padding: "8px" }}>Tipo</th>
-                <th style={{ border: "1px solid black", padding: "8px" }}>Comentario</th>
-                <th style={{ border: "1px solid black", padding: "8px" }}>Votar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {getFilteredGames().map((g) => (
-                <tr key={g.objectid}>
-                  <td style={{ border: "1px solid black", padding: "8px" }}>
-                    <a href={g.image_link} target="_blank">{g.objectname}</a>
-                  </td>
-                  <td style={{ border: "1px solid black", padding: "8px" }}>{g.originalname}</td>
-                  <td style={{ border: "1px solid black", padding: "8px" }}>{g.itemtype}</td>
-                  <td style={{ border: "1px solid black", padding: "8px" }}>{g.comment}</td>
-                  <td style={{ border: "1px solid black", padding: "8px" }}>
-                    {filterUsers.length === 0 ? (
-                      <>
-                        <button onClick={() => handleVote(g.objectid, 1)}>👍</button>
-                        <button onClick={() => handleVote(g.objectid, -1)}>👎</button>
-                      </>
-                    ) : (
-                      <span>{g.likesCount} 👍</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <h2>Filtrar por usuarios</h2>
+      <div style={{ marginBottom: "10px" }}>
+        {votersList.map((user) => (
+          <label key={user} style={{ marginRight: "10px" }}>
+            <input
+              type="checkbox"
+              checked={filterUsers.includes(user)}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  setFilterUsers(prev => [...prev, user]);
+                } else {
+                  setFilterUsers(prev => prev.filter(u => u !== user));
+                }
+              }}
+            />
+            {user}
+          </label>
+        ))}
+      </div>
+
+      {/* Grid de tarjetas */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+        gap: "15px"
+      }}>
+        {getFilteredGames().map((g) => {
+          const userVote = votes[g.objectid]?.[username] || 0;
+          return (
+            <div key={g.objectid} style={{
+              border: "1px solid #ccc",
+              borderRadius: "10px",
+              padding: "15px",
+              background: "#f9f9f9",
+              boxShadow: "2px 2px 6px rgba(0,0,0,0.1)"
+            }}>
+              <h3>
+                <a href={g.image_link} target="_blank" rel="noreferrer">
+                  {g.objectname}
+                </a>
+              </h3>
+              <p><b>Original:</b> {g.originalname}</p>
+              <p><b>Tipo:</b> {g.itemtype}</p>
+              <p><b>Comentario:</b> {g.comment}</p>
+
+              {filterUsers.length === 0 ? (
+                <div>
+                  <button
+                    onClick={() => handleVote(g.objectid, 1)}
+                    style={{
+                      background: userVote === 1 ? "green" : "#ddd",
+                      color: userVote === 1 ? "white" : "black",
+                      marginRight: "10px",
+                      padding: "5px 10px",
+                      borderRadius: "5px"
+                    }}
+                  >
+                    👍
+                  </button>
+                  <button
+                    onClick={() => handleVote(g.objectid, -1)}
+                    style={{
+                      background: userVote === -1 ? "red" : "#ddd",
+                      color: userVote === -1 ? "white" : "black",
+                      padding: "5px 10px",
+                      borderRadius: "5px"
+                    }}
+                  >
+                    👎
+                  </button>
+                </div>
+              ) : (
+                <p>{g.likesCount} 👍</p>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

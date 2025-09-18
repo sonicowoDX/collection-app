@@ -1,0 +1,79 @@
+/* 🎨 Estilos generales */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #f8f9fa;
+}
+
+/* Contenedor principal */
+.container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+/* Tarjeta de juego */
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  padding: 16px;
+  text-align: center;
+  transition: transform 0.2s ease-in-out;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+}
+
+/* Botones */
+.card button {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 4px;
+  cursor: pointer;
+  font-size: 18px;
+  transition: background 0.2s ease-in-out;
+}
+
+.card button.like {
+  background: #e2e8f0;
+}
+
+.card button.like.active {
+  background: #38a169;
+  color: white;
+}
+
+.card button.dislike {
+  background: #e2e8f0;
+}
+
+.card button.dislike.active {
+  background: #e53e3e;
+  color: white;
+}
+
+/* 📱 Responsivo para móviles */
+@media (max-width: 768px) {
+  .container {
+    grid-template-columns: 1fr; /* una tarjeta por fila */
+    padding: 8px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .card h3 {
+    font-size: 16px;
+  }
+
+  .card button {
+    font-size: 16px;
+    padding: 6px 10px;
+  }
+}
