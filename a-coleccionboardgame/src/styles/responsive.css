@@ -3,7 +3,12 @@ body {
   font-family: Arial, sans-serif;
   margin: 0;
   padding: 0;
-  background: #f8f9fa;
+  background: #000000;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+  flex-direction: row;
+  align-content: stretch;
 }
 
 /* Contenedor principal */
@@ -16,8 +21,9 @@ body {
 
 /* Tarjeta de juego */
 .card {
-  background: #fff;
+  background: #00000081;
   border-radius: 16px;
+  border-color: #636363;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
   padding: 16px;
   text-align: center;
@@ -77,3 +83,4 @@ body {
     padding: 6px 10px;
   }
 }
+

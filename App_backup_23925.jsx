@@ -16,68 +16,27 @@ export default function App() {
   const [votersList, setVotersList] = useState([]);
   const [isUserConfirmed, setIsUserConfirmed] = useState(false);
 
-  // 🔹 Nuevo: control de orden y tipo
-  const [sortOption, setSortOption] = useState("name");
-  const [filterType, setFilterType] = useState("all");
-
   // Guardar o actualizar voto
   async function handleVote(gameId, objectid, v) {
     if (!username) return;
 
-    // Actualizamos estado local
     setVotes((prev) => ({
       ...prev,
       [objectid]: { ...prev[objectid], [username]: v }
     }));
 
-    // Obtenemos si ya existe favorito para no perderlo
-    const existingFavorite = votes[objectid]?.[`${username}_favorite`] ?? false;
-
-    // Hacemos upsert incluyendo favorite
     await supabase.from("votes").upsert(
       {
         collection_code: collectionCode,
         objectid,
         username,
-        vote: v,
-        favorite: existingFavorite
+        vote: v
       },
       { onConflict: "collection_code,objectid,username" }
     );
 
     await loadVotersList();
   }
-
-  // Marcar o desmarcar favorito
-  async function handleFavorite(objectid, currentFavorite) {
-    if (!username) return;
-
-    const existingVote = votes[objectid]?.[username] ?? 0;
-    const newFavorite = !currentFavorite;
-
-    setVotes((prev) => ({
-      ...prev,
-      [objectid]: {
-        ...prev[objectid],
-        [username]: existingVote,
-        favorite: newFavorite
-      }
-    }));
-
-    const { error } = await supabase
-      .from("votes")
-      .upsert(
-        {
-          collection_code: collectionCode,
-          objectid,          // ✅ ahora sí se envía
-          username,
-          vote: existingVote,
-          favorite: newFavorite
-        },
-        { onConflict: "collection_code,objectid,username" }
-      );
-  }
-
 
   // Subir colección
   async function handleUploadCSV(e) {
@@ -103,16 +62,20 @@ export default function App() {
 
         let code;
         if (existingCollection) {
+          // Ya existe → usamos el mismo código
           code = existingCollection.collection_code;
           setCollectionCode(code);
           setOwner(username);
 
+          // Ver qué juegos ya existen
           const { data: existingGames } = await supabase
             .from("games")
             .select("objectid")
             .eq("collection_code", code);
 
           const existingIds = new Set(existingGames.map((g) => g.objectid));
+
+          // Solo nuevos juegos
           const newGames = rows.filter((r) => !existingIds.has(r.objectid));
 
           if (newGames.length === 0) {
@@ -151,6 +114,7 @@ export default function App() {
           await supabase.from("games").insert(gamesData);
           setGames((prev) => [...prev, ...gamesData]);
         } else {
+          // No existe → crear nueva colección
           code = randomCollectionCode();
           setCollectionCode(code);
           setOwner(username);
@@ -209,25 +173,22 @@ export default function App() {
     await loadVotersList();
   }
 
-  // Cargar votos (incluyendo favorite)
-    async function loadVotes() {
-      if (!collectionCode) return;
-      const { data } = await supabase
-        .from("votes")
-        .select("*")
-        .eq("collection_code", collectionCode);
-  
-      const votesMap = {};
-      data?.forEach((v) => {
-        if (!votesMap[v.objectid]) votesMap[v.objectid] = {};
-        votesMap[v.objectid][v.username] = {
-          vote: v.vote,
-          favorite: v.favorite || false
-        };
-      });
-  
-      setVotes(votesMap);
-    }
+  // Cargar votos
+  async function loadVotes() {
+    if (!collectionCode) return;
+    const { data } = await supabase
+      .from("votes")
+      .select("*")
+      .eq("collection_code", collectionCode);
+
+    const votesMap = {};
+    data?.forEach((v) => {
+      if (!votesMap[v.objectid]) votesMap[v.objectid] = {};
+      votesMap[v.objectid][v.username] = v.vote;
+    });
+
+    setVotes(votesMap);
+  }
 
   // Lista de votantes
   async function loadVotersList() {
@@ -241,41 +202,36 @@ export default function App() {
 
   // Filtro dinámico con conteos
   function getFilteredGames() {
-    let list = games.map((g) => {
+    if (filterUsers.length === 0) {
+      // Orden alfabético si no hay filtros
+      return [...games].sort((a, b) =>
+        a.objectname.localeCompare(b.objectname)
+      );
+    }
+
+    const filtered = games.map((g) => {
       const gameVotes = votes[g.objectid] || {};
       let likes = 0,
         dislikes = 0,
         neutrals = 0,
         notPlayed = 0;
 
-      const voters = [];
-
-      votersList.forEach((user) => {
+      filterUsers.forEach((user) => {
         const v = gameVotes[user];
         if (v === 1) likes++;
         else if (v === -1) dislikes++;
         else if (v === 0) neutrals++;
         else if (v === -2) notPlayed++;
-        if (v !== undefined) voters.push(user);
       });
 
-      return { ...g, likes, dislikes, neutrals, notPlayed, voters };
+      return { ...g, likes, dislikes, neutrals, notPlayed };
     });
 
-    if (filterType === "base") {
-      list = list.filter((g) => g.itemtype === "boardgame");
-    } else if (filterType === "expansion") {
-      list = list.filter((g) => g.itemtype.includes("expansion"));
-    }
-
-    if (sortOption === "name") {
-      list.sort((a, b) => a.objectname.localeCompare(b.objectname));
-    } else if (sortOption === "votes") {
-      list.sort((a, b) => b.likes - a.likes);
-    }
-
-    return list;
+    return filtered
+      .filter((g) => g.likes || g.dislikes || g.neutrals || g.notPlayed)
+      .sort((a, b) => b.likes - a.likes); // 👈 orden por likes
   }
+
 
   async function getBGGImage(objectid) {
     try {
@@ -294,6 +250,7 @@ export default function App() {
   }
 
   async function checkUserCollection(user) {
+    // Consultar si el usuario ya tiene colección
     const { data: collectionsData } = await supabase
       .from("collections")
       .select("*")
@@ -301,15 +258,18 @@ export default function App() {
       .limit(1);
 
     if (collectionsData?.length > 0) {
+      // Si ya existe colección, cargar automáticamente
       const collection = collectionsData[0];
       setCollectionCode(collection.collection_code);
       setOwner(user);
       setIsUserConfirmed(true);
-      await loadCollection();
+      await loadCollection(); // cargar juegos y votos
     } else {
+      // Si no tiene colección, confirmar usuario para crear nueva
       setIsUserConfirmed(true);
     }
   }
+
 
   // ===================== RENDER =====================
 
@@ -341,7 +301,13 @@ export default function App() {
   }
 
   return (
-    <div style={{ fontFamily: "Arial, sans-serif", padding: "10px", textAlign: "center" }}>
+    <div
+      style={{
+        fontFamily: "Arial, sans-serif",
+        padding: "10px",
+        textAlign: "center"
+      }}
+    >
       <h1>🎲 Colección de Juegos</h1>
 
       <div style={{ margin: "20px 0" }}>
@@ -379,26 +345,6 @@ export default function App() {
         ))}
       </div>
 
-      {/* 🔹 Nuevo: opciones de orden y filtro */}
-      <div style={{ margin: "15px 0" }}>
-        <label>
-          Ordenar por:{" "}
-          <select value={sortOption} onChange={(e) => setSortOption(e.target.value)}>
-            <option value="name">Nombre</option>
-            <option value="votes">Número de votos</option>
-          </select>
-        </label>
-        {" | "}
-        <label>
-          Tipo:{" "}
-          <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-            <option value="all">Todos</option>
-            <option value="standalone">Solo juegos base</option>
-            <option value="expansion">Solo expansiones</option>
-          </select>
-        </label>
-      </div>
-
       <div
         style={{
           display: "grid",
@@ -409,40 +355,16 @@ export default function App() {
       >
         {getFilteredGames().map((g) => {
           const userVote = votes[g.objectid]?.[username] ?? null;
-          const isFavorite = votes[g.objectid]?.[`${username}_favorite`] ?? false;
-          const userFavorite = votes[g.objectid]?.[username]?.favorite ?? false;
-
           return (
             <div
               key={g.id}
               style={{
-                position: "relative",
                 border: "1px solid #4b4b4bff",
                 borderRadius: "10px",
                 padding: "15px",
                 background: "#00000088"
               }}
             >
-              {/* ⭐ favorito */}
-              <button
-                onClick={() => handleFavorite(g.objectid, userFavorite)}
-                style={{
-                  position: "absolute",
-                  top: "10px",
-                  right: "10px",
-                  background: userFavorite ? "gold" : "#363636e1",
-                  color: "black",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: "30px",
-                  height: "30px",
-                  cursor: "pointer",
-                  padding: "0%"
-                }}
-              >
-              ⭐
-              </button>
-
               <img
                 src={g.image_link}
                 alt={g.objectname}
@@ -458,9 +380,15 @@ export default function App() {
                   {g.objectname}
                 </a>
               </h3>
-              <p><b>Original:</b> {g.originalname}</p>
-              <p><b>Tipo:</b> {g.itemtype}</p>
-              <p><b>Comentario:</b> {g.comment}</p>
+              <p>
+                <b>Original:</b> {g.originalname}
+              </p>
+              <p>
+                <b>Tipo:</b> {g.itemtype}
+              </p>
+              <p>
+                <b>Comentario:</b> {g.comment}
+              </p>
 
               {filterUsers.length === 0 ? (
                 <div>
@@ -499,17 +427,17 @@ export default function App() {
                     onClick={() => handleVote(g.id, g.objectid, -2)}
                     style={{
                       background: userVote === -2 ? "purple" : "#36363679",
-                      color: "white",
-                      marginTop: "5px"
+                      color: "white", marginTop: "5px"
                     }}
+                  
                   >
                     ❌ No Jugado
                   </button>
                 </div>
               ) : (
-                <p title={g.voters?.join(", ")}>
-                  👍 {g.likes || 0} | 👎 {g.dislikes || 0} | 😐 {g.neutrals || 0} | ❌{" "}
-                  {g.notPlayed || 0}
+                <p>
+                  👍 {g.likes || 0} | 👎 {g.dislikes || 0} | 😐{" "}
+                  {g.neutrals || 0} | ❌ {g.notPlayed || 0}
                 </p>
               )}
             </div>
@@ -519,3 +447,20 @@ export default function App() {
     </div>
   );
 }
+
+{/* ⭐ favorito */}
+              <button
+                onClick={() => toggleFavorite(g.objectid)}
+                style={{
+                  position: "absolute",
+                  top: "8px",
+                  right: "8px",
+                  background: "none",
+                  border: "none",
+                  fontSize: "20px",
+                  cursor: "pointer",
+                  color: isFavorite ? "gold" : "#555"
+                }}
+              >
+                ⭐
+              </button>
