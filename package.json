@@ -2,7 +2,7 @@
   "homepage": "https://sonicowoDX.github.io/collection-app",
   "name": "a-coleccionboardgame",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
