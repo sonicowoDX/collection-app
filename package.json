@@ -27,6 +27,6 @@
     "build": "vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "git add . && git commit -m \"Auto deploy\" && git push origin main && gh-pages -d build"
+    "deploy": "git add . && git commit -m \"Auto deploy\" && git push origin main && gh-pages -d dist"
   }
 }
