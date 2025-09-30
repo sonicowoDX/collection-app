@@ -15,19 +15,10 @@ export default function App() {
   const [filterUsers, setFilterUsers] = useState([]);
   const [votersList, setVotersList] = useState([]);
   const [isUserConfirmed, setIsUserConfirmed] = useState(false);
-  const [expandedGames, setExpandedGames] = useState({});
 
   // 🔹 Nuevo: control de orden y tipo
   const [sortOption, setSortOption] = useState("name");
   const [filterType, setFilterType] = useState("all");
-
-  // Función para alternar expansión
-  function toggleExpand(objectid) {
-    setExpandedGames(prev => ({
-      ...prev,
-      [objectid]: !prev[objectid]
-    }));
-  }
 
   // Guardar o actualizar voto
   async function handleVote(gameId, objectid, v) {
@@ -51,6 +42,8 @@ export default function App() {
 
       return updatedVotes;
     });
+
+    console.log("handleVote llamado con:", { collectionCode, username, objectid, v, existingFavorite });
 
     // 🔹 Ahora sí, hacemos el upsert fuera del setVotes
     const { error } = await supabase.from("votes").upsert(
@@ -119,52 +112,41 @@ export default function App() {
       complete: async (results) => {
         const rows = results.data;
 
-        // Obtener la colección existente del usuario
+        // Verificar si el usuario ya tiene colección
         const { data: existingCollection } = await supabase
           .from("collections")
           .select("collection_code")
           .eq("owner", username)
-          .maybeSingle();
+          .single();
 
         let code;
         if (existingCollection) {
-          // Ya existe colección → usar ese code
           code = existingCollection.collection_code;
           setCollectionCode(code);
           setOwner(username);
 
-          // Juegos en la DB
           const { data: existingGames } = await supabase
             .from("games")
             .select("objectid")
             .eq("collection_code", code);
 
-          const dbIds = new Set(existingGames.map((g) => g.objectid));
-          const csvIds = new Set(rows.map((r) => r.objectid));
+          const existingIds = new Set(existingGames.map((g) => g.objectid));
+          const newGames = rows.filter((r) => !existingIds.has(r.objectid));
 
-          // Borrar juegos que ya no estén en el CSV
-          const toDelete = [...dbIds].filter((id) => !csvIds.has(id));
-          if (toDelete.length > 0) {
-            // Primero borrar votos de esos juegos
-            await supabase.from("votes").delete()
-              .eq("collection_code", code)
-              .in("objectid", toDelete);
-
-            // Luego borrar los juegos
-            await supabase.from("games").delete()
-              .eq("collection_code", code)
-              .in("objectid", toDelete);
+          if (newGames.length === 0) {
+            alert("Tu colección ya está actualizada, no hay juegos nuevos.");
+            return;
           }
 
-          // Insertar solo los nuevos juegos
-          const toInsert = rows.filter((r) => !dbIds.has(r.objectid));
-          if (toInsert.length > 0) {
-            const gamesData = await Promise.all(toInsert.map(async (r) => {
+          const gamesData = await Promise.all(
+            newGames.map(async (r) => {
               const objectid = r.objectid;
-              const slug = (r.originalname || r.objectname)
-                .toLowerCase()
-                .replace(/\s+/g, "-")
-                .replace(/[^a-z0-9-]/g, "");
+              const slug = r.originalname
+                ? r.originalname
+                    .toLowerCase()
+                    .replace(/\s+/g, "-")
+                    .replace(/[^a-z0-9-]/g, "")
+                : r.objectname.toLowerCase().replace(/\s+/g, "-");
               const type = r.itemtype?.includes("expansion")
                 ? "boardgameexpansion"
                 : "boardgame";
@@ -181,21 +163,20 @@ export default function App() {
                 image_link,
                 link_bgg: `https://boardgamegeek.com/${type}/${objectid}/${slug}`
               };
-            }));
+            })
+          );
 
-            await supabase.from("games").insert(gamesData);
-          }
+          await supabase.from("games").insert(gamesData);
+          setGames((prev) => [...prev, ...gamesData]);
         } else {
-          let code = collectionCode;
+          code = randomCollectionCode();
+          setCollectionCode(code);
+          setOwner(username);
 
-          if (!code) {
-            if (existingCollection) {
-              code = existingCollection.collection_code;
-            } else {
-              code = randomCollectionCode();
-              await supabase.from("collections").insert({ owner: username, collection_code: code });
-            }
-          }
+          await supabase.from("collections").insert({
+            collection_code: code,
+            owner: username
+          });
 
           const gamesData = await Promise.all(
             rows.map(async (r) => {
@@ -281,43 +262,23 @@ export default function App() {
   function getFilteredGames() {
     let list = games.map((g) => {
       const gameVotes = votes[g.objectid] || {};
-
-      // 🔹 Elegir usuarios relevantes (todos si no hay filtro)
-      const relevantUsers = filterUsers.length > 0 ? filterUsers : votersList;
-
       let likes = 0,
         dislikes = 0,
         neutrals = 0,
         notPlayed = 0;
-      
-      let favoritesCount = 0;
+
+      const voters = [];
 
       votersList.forEach((user) => {
         const v = gameVotes[user];
-        if (v?.favorite) favoritesCount++;
+        if (v === 1) likes++;
+        else if (v === -1) dislikes++;
+        else if (v === 0) neutrals++;
+        else if (v === -2) notPlayed++;
+        if (v !== undefined) voters.push(user);
       });
 
-      // 🔹 Guardar también detalle de quién votó qué
-      const detail = { likes: [], dislikes: [], neutrals: [], notPlayed: [] };
-
-      relevantUsers.forEach((user) => {
-        const v = gameVotes[user]?.vote;
-        if (v === 1) {
-          likes++;
-          detail.likes.push(user);
-        } else if (v === -1) {
-          dislikes++;
-          detail.dislikes.push(user);
-        } else if (v === 0) {
-          neutrals++;
-          detail.neutrals.push(user);
-        } else if (v === -2) {
-          notPlayed++;
-          detail.notPlayed.push(user);
-        }
-      });
-
-      return { ...g, likes, dislikes, neutrals, notPlayed, detail, favoritesCount };
+      return { ...g, likes, dislikes, neutrals, notPlayed, voters };
     });
 
     if (filterType === "base") {
@@ -329,13 +290,11 @@ export default function App() {
     if (sortOption === "name") {
       list.sort((a, b) => a.objectname.localeCompare(b.objectname));
     } else if (sortOption === "votes") {
-      // 🔹 Ordenar solo con base en likes de usuarios relevantes
       list.sort((a, b) => b.likes - a.likes);
     }
 
     return list;
   }
-
 
   async function getBGGImage(objectid) {
     try {
@@ -405,7 +364,7 @@ export default function App() {
       <h1>🎲 Colección de Juegos</h1>
 
       <div style={{ margin: "20px 0" }}>
-        <h2>Subir/actualizar colección (CSV exportado de la BGG)</h2>
+        <h2>Subir colección (CSV exportado de la BGG)</h2>
         <input type="file" accept=".csv" onChange={handleUploadCSV} />
       </div>
 
@@ -523,110 +482,59 @@ export default function App() {
               <p><b>Comentario:</b> {g.comment}</p>
 
               {filterUsers.length === 0 ? (
-              // 🔹 Vista normal: botones de voto
-              <div>
-                <button
-                  onClick={() => handleVote(g.id, g.objectid, 1)}
-                  style={{
-                    background: userVote === 1 ? "green" : "#36363679",
-                    color: "white",
-                    marginRight: "5px"
-                  }}
-                >
-                  👍
-                </button>
-                <button
-                  onClick={() => handleVote(g.id, g.objectid, 0)}
-                  style={{
-                    background: userVote === 0 ? "gray" : "#36363679",
-                    color: "white",
-                    marginRight: "5px"
-                  }}
-                >
-                  😐
-                </button>
-                <button
-                  onClick={() => handleVote(g.id, g.objectid, -1)}
-                  style={{
-                    background: userVote === -1 ? "red" : "#36363679",
-                    color: "white",
-                    marginRight: "5px"
-                  }}
-                >
-                  👎
-                </button>
-                <br />
-                <button
-                  onClick={() => handleVote(g.id, g.objectid, -2)}
-                  style={{
-                    background: userVote === -2 ? "purple" : "#36363679",
-                    color: "white",
-                    marginTop: "5px"
-                  }}
-                >
-                  ❌ No Jugado
-                </button>
-              </div>
-            ) : (
-              // 🔹 Vista filtrada: detalle de usuarios seleccionados
-              <div style={{ textAlign: "center", marginTop: "10px" }}>
-              {/* Resumen en una sola línea */}
-              <p style={{ cursor: "pointer", fontWeight: "bold" }}
-                onClick={() => toggleExpand(g.objectid)}>
-                ⭐ {g.favoritesCount} | 👍 {g.likes} | 👎 {g.dislikes} | 😐 {g.neutrals} | ❌ {g.notPlayed}
-                {" "}
-                <br />
-                <span style={{ fontSize: "12px", color: "#999", textAlign: "center" }}>
-                  ({expandedGames[g.objectid] ? "Ocultar" : "Ver detalle"})
-                </span>
-              </p>
-
-              {/* Detalle colapsable */}
-              {expandedGames[g.objectid] && (
-                <div style={{ marginLeft: "10px", fontSize: "14px" }}>
-                  <p>👍 {g.detail.likes.join(", ") || "—"}</p>
-                  <p>👎 {g.detail.dislikes.join(", ") || "—"}</p>
-                  <p>😐 {g.detail.neutrals.join(", ") || "—"}</p>
-                  <p>❌ {g.detail.notPlayed.join(", ") || "—"}</p>
+                <div>
+                  <button
+                    onClick={() => handleVote(g.id, g.objectid, 1)}
+                    style={{
+                      background: userVote === 1 ? "green" : "#36363679",
+                      color: "white",
+                      marginRight: "5px"
+                    }}
+                  >
+                    👍
+                  </button>
+                  <button
+                    onClick={() => handleVote(g.id, g.objectid, 0)}
+                    style={{
+                      background: userVote === 0 ? "gray" : "#36363679",
+                      color: "white",
+                      marginRight: "5px"
+                    }}
+                  >
+                    😐
+                  </button>
+                  <button
+                    onClick={() => handleVote(g.id, g.objectid, -1)}
+                    style={{
+                      background: userVote === -1 ? "red" : "#36363679",
+                      color: "white",
+                      marginRight: "5px"
+                    }}
+                  >
+                    👎
+                  </button>
+                  <br />
+                  <button
+                    onClick={() => handleVote(g.id, g.objectid, -2)}
+                    style={{
+                      background: userVote === -2 ? "purple" : "#36363679",
+                      color: "white",
+                      marginTop: "5px"
+                    }}
+                  >
+                    ❌ No Jugado
+                  </button>
                 </div>
+              ) : (
+                <p title={g.voters?.join(", ")}>
+                  👍 {g.likes || 0} | 👎 {g.dislikes || 0} | 😐 {g.neutrals || 0} | ❌{" "}
+                  {g.notPlayed || 0}
+                </p>
               )}
-            </div>
-            )}
             </div>
           );
         })}
       </div>
-      <div style={{ marginTop: "20px", textAlign: "center" }}>
-      <hr style={{ border: "1px solid #4b4b4b", margin: "10px 0" }} />
-      <p>Si te gusta la app, ¡puedes apoyarme con una donación! - Reporta errores y/o sugerencias desde el formulario de abajo.</p>
-      <a
-        href="https://paypal.me/davidolivettopalomin"
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ textDecoration: "none" }}
-      >
-        <img
-          src="https://www.paypalobjects.com/webstatic/mktg/logo/pp_cc_mark_111x69.jpg"
-          alt="Donar con PayPal"
-          style={{ width: "100px", cursor: "pointer", filter: "grayscale(100%)" }}
-        />
-      </a>
-      <a
-        href="https://forms.gle/i6UKCkytCz61BJos8"
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{ textDecoration: "none" }}
-      >
-        <img
-          src="https://cdn-icons-png.flaticon.com/512/2333/2333501.png"
-          alt="Reportar error"
-          style={{ width: "65px", cursor: "pointer", marginRight: "10px", filter: "grayscale(100%)", padding: "5px" }}
-          
-        />
-      </a>
-      <p>Creada por <strong>David Olivetto</strong></p>
-    </div>
     </div>
   );
-  
 }
